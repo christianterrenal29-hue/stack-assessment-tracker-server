@@ -19,13 +19,10 @@ import rubricRoutes from './routes/rubricRoutes';
 import competencyRoutes from './routes/competencyRoutes';
 import qualificationRoutes from './routes/qualificationRoutes';
 import attendanceRoutes from './routes/attendanceRoutes';
-import ojtRoutes from './routes/ojtRoutes';
 import courseRoutes from './routes/courseRoutes';
 import certificateRoutes from './routes/certificateRoutes';
-import riskMonitoringRoutes from './routes/riskMonitoringRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
 import notificationRoutes from './routes/notificationRoutes';
-import riskSchedulerRoutes from './routes/riskSchedulerRoutes';
 import fileRoutes from './routes/fileRoutes';
 import auditLogRoutes from './routes/auditLogRoutes';
 
@@ -53,13 +50,10 @@ app.use('/api/rubrics', rubricRoutes);
 app.use('/api/competencies', competencyRoutes);
 app.use('/api/qualifications', qualificationRoutes);
 app.use('/api/attendance', attendanceRoutes);
-app.use('/api/ojt', ojtRoutes);
 app.use('/api/courses', courseRoutes);
 app.use('/api/certificates', certificateRoutes);
-app.use('/api/risk-monitoring', riskMonitoringRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/scheduler', riskSchedulerRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 

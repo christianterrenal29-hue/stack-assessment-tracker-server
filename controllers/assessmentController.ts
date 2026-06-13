@@ -6,193 +6,93 @@ import { safeParamString } from '../utils/request';
 
 export class AssessmentController {
   static async getAllAssessments(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const filters = {
-        educator: req.query.educator,
-        department: req.query.department,
-        status: req.query.status,
-        institution: req.query.institution,
-      };
+    const assessments = await AssessmentService.getAllAssessments({
+      assessor: req.query.assessor,
+      course: req.query.course,
+      yearLevel: req.query.yearLevel,
+      department: req.query.department,
+      status: req.query.status,
+      institution: req.query.institution,
+      from: req.query.from,
+      to: req.query.to,
+    });
 
-      const assessments = await AssessmentService.getAllAssessments(filters);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessments,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(200).json({ status: 'success', data: assessments });
   }
 
   static async getAssessmentById(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const safeId = safeParamString(id, 'Assessment ID');
-
-      const assessment = await AssessmentService.getAssessmentById(safeId);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessment,
-      });
-    } catch (error) {
-      throw error;
-    }
+    const assessment = await AssessmentService.getAssessmentById(safeParamString(req.params.id, 'Assessment schedule ID'));
+    res.status(200).json({ status: 'success', data: assessment });
   }
 
   static async createAssessment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { title, description, type, department, institution, duration, totalPoints } = req.body;
+    if (!req.user?.userId) throw new AppError(401, 'Not authenticated');
 
-      if (!title || !type || !institution) {
-        throw new AppError(400, 'Title, type, and institution are required');
-      }
+    const assessment = await AssessmentService.createAssessment({
+      ...req.body,
+      createdBy: req.user.userId,
+    });
 
-      const assessment = await AssessmentService.createAssessment({
-        title,
-        description,
-        type,
-        educator: req.user?.userId,
-        department,
-        institution,
-        duration,
-        totalPoints,
-      });
-
-      res.status(201).json({
-        status: 'success',
-        data: assessment,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(201).json({ status: 'success', data: assessment });
   }
 
   static async updateAssessment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const safeId = safeParamString(id, 'Assessment ID');
-      const { title, description, duration, totalPoints, status } = req.body;
+    const assessment = await AssessmentService.updateAssessment(
+      safeParamString(req.params.id, 'Assessment schedule ID'),
+      req.body
+    );
 
-      const assessment = await AssessmentService.updateAssessment(safeId, {
-        title,
-        description,
-        duration,
-        totalPoints,
-        status,
-      });
-
-      res.status(200).json({
-        status: 'success',
-        data: assessment,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(200).json({ status: 'success', data: assessment });
   }
 
   static async deleteAssessment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const safeId = safeParamString(id, 'Assessment ID');
-
-      await AssessmentService.deleteAssessment(safeId);
-
-      res.status(200).json({
-        status: 'success',
-        message: 'Assessment deleted successfully',
-      });
-    } catch (error) {
-      throw error;
-    }
+    await AssessmentService.deleteAssessment(safeParamString(req.params.id, 'Assessment schedule ID'));
+    res.status(200).json({ status: 'success', message: 'Assessment schedule deleted successfully' });
   }
 
-  static async publishAssessment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const safeId = safeParamString(id, 'Assessment ID');
+  static async addCandidate(req: AuthRequest, res: Response): Promise<void> {
+    const assessment = await AssessmentService.addCandidate(
+      safeParamString(req.params.id, 'Assessment schedule ID'),
+      req.body.studentId
+    );
 
-      const assessment = await AssessmentService.publishAssessment(safeId);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessment,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(200).json({ status: 'success', data: assessment });
   }
 
-  static async getAssessmentsByEducator(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { educatorId } = req.params;
-      const safeEducatorId = safeParamString(educatorId, 'Educator ID');
+  static async removeCandidate(req: AuthRequest, res: Response): Promise<void> {
+    const assessment = await AssessmentService.removeCandidate(
+      safeParamString(req.params.id, 'Assessment schedule ID'),
+      safeParamString(req.params.studentId, 'Student ID')
+    );
 
-      const assessments = await AssessmentService.getAssessmentsByEducator(safeEducatorId);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessments,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(200).json({ status: 'success', data: assessment });
   }
 
-  static async getAssessmentsByDepartment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { departmentId } = req.params;
-      const safeDepartmentId = safeParamString(departmentId, 'Department ID');
+  static async updateCandidate(req: AuthRequest, res: Response): Promise<void> {
+    const assessment = await AssessmentService.updateCandidate(
+      safeParamString(req.params.id, 'Assessment schedule ID'),
+      safeParamString(req.params.studentId, 'Student ID'),
+      req.body
+    );
 
-      const assessments = await AssessmentService.getAssessmentsByDepartment(safeDepartmentId);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessments,
-      });
-    } catch (error) {
-      throw error;
-    }
+    res.status(200).json({ status: 'success', data: assessment });
   }
 
   static async searchAssessments(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { q } = req.query;
+    const { q } = req.query;
+    if (!q || typeof q !== 'string') throw new AppError(400, 'Search query required');
 
-      if (!q || typeof q !== 'string') {
-        throw new AppError(400, 'Search query required');
-      }
-
-      const assessments = await AssessmentService.searchAssessments(q);
-
-      res.status(200).json({
-        status: 'success',
-        data: assessments,
-      });
-    } catch (error) {
-      throw error;
-    }
+    const assessments = await AssessmentService.searchAssessments(q);
+    res.status(200).json({ status: 'success', data: assessments });
   }
 
-  static async duplicateAssessment(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { id } = req.params;
-      const safeId = safeParamString(id, 'Assessment ID');
-      const { newTitle } = req.body;
+  static async getDashboardSummary(req: AuthRequest, res: Response): Promise<void> {
+    const summary = await AssessmentService.getDashboardSummary();
+    res.status(200).json({ status: 'success', data: summary });
+  }
 
-      if (!newTitle) {
-        throw new AppError(400, 'New title is required');
-      }
-
-      const assessment = await AssessmentService.duplicateAssessment(safeId, newTitle);
-
-      res.status(201).json({
-        status: 'success',
-        data: assessment,
-      });
-    } catch (error) {
-      throw error;
-    }
+  static async getReport(req: AuthRequest, res: Response): Promise<void> {
+    const report = await AssessmentService.getReport(safeParamString(req.params.type, 'Report type'));
+    res.status(200).json({ status: 'success', data: report });
   }
 }

@@ -1,4 +1,4 @@
-import Student from '../models/Student';
+import Student, { COURSE_OPTIONS, CourseOption, YEAR_LEVEL_OPTIONS, YearLevelOption } from '../models/Student';
 import { User } from '../models/User';
 import { Types } from 'mongoose';
 import { StudentPerformance } from '../models/StudentPerformance';
@@ -9,14 +9,14 @@ export type RiskLevel = 'low' | 'medium' | 'high';
 
 export interface CreateStudentInput {
   studentId: string;
+  course: CourseOption;
+  yearLevel: YearLevelOption;
   enrollmentDate?: Date | string;
   status?: StudentStatus;
   qualifications?: string[];
   currentCompetencies?: string[];
   completedCompetencies?: string[];
   attendancePercentage?: number;
-  totalOJTHours?: number;
-  requiredOJTHours?: number;
   riskLevel?: RiskLevel;
 }
 
@@ -34,6 +34,8 @@ type StudentUpdatePayload = Omit<
 export interface StudentFilters {
   status?: StudentStatus;
   riskLevel?: RiskLevel;
+  course?: CourseOption;
+  yearLevel?: YearLevelOption;
   search?: string;
 }
 
@@ -54,6 +56,9 @@ const hasObjectId = (ids: Types.ObjectId[], id: Types.ObjectId): boolean => {
 };
 
 const buildStudentUpdate = (updateData: UpdateStudentInput): StudentUpdatePayload => {
+  if (updateData.course !== undefined) validateCourse(updateData.course);
+  if (updateData.yearLevel !== undefined) validateYearLevel(updateData.yearLevel);
+
   return {
     ...updateData,
     qualifications: updateData.qualifications
@@ -68,6 +73,22 @@ const buildStudentUpdate = (updateData: UpdateStudentInput): StudentUpdatePayloa
   };
 };
 
+export const validateCourse = (course: string): CourseOption => {
+  if (!COURSE_OPTIONS.includes(course as CourseOption)) {
+    throw new Error('Course must be IT, HRMT, ECT, or HST');
+  }
+
+  return course as CourseOption;
+};
+
+export const validateYearLevel = (yearLevel: string): YearLevelOption => {
+  if (!YEAR_LEVEL_OPTIONS.includes(yearLevel as YearLevelOption)) {
+    throw new Error('Year level must be 1st Year, 2nd Year, or 3rd Year');
+  }
+
+  return yearLevel as YearLevelOption;
+};
+
 export class StudentService {
   async createStudent(userId: string, studentData: CreateStudentInput) {
     const userObjectId = toObjectId(userId, 'user id');
@@ -75,6 +96,9 @@ export class StudentService {
     if (!user || user.role !== 'student') {
       throw new Error('User must have student role');
     }
+
+    const course = validateCourse(studentData.course);
+    const yearLevel = validateYearLevel(studentData.yearLevel);
 
     const existingStudent = await Student.findOne({ user: userObjectId });
     if (existingStudent) {
@@ -84,14 +108,14 @@ export class StudentService {
     const student = new Student({
       user: userObjectId,
       studentId: studentData.studentId,
+      course,
+      yearLevel,
       enrollmentDate: studentData.enrollmentDate || new Date(),
       status: studentData.status || 'active',
       qualifications: toObjectIds(studentData.qualifications, 'qualification id'),
       currentCompetencies: toObjectIds(studentData.currentCompetencies, 'competency id'),
       completedCompetencies: toObjectIds(studentData.completedCompetencies, 'competency id'),
       attendancePercentage: studentData.attendancePercentage || 0,
-      totalOJTHours: studentData.totalOJTHours || 0,
-      requiredOJTHours: studentData.requiredOJTHours || 500,
       riskLevel: studentData.riskLevel || 'low',
     });
 
@@ -166,11 +190,10 @@ export class StudentService {
     );
 
     const gradedSubmissions = submissions.filter((submission) => submission.status === 'graded').length;
-    const ojtPercentage =
-      student.requiredOJTHours > 0 ? Math.round((student.totalOJTHours / student.requiredOJTHours) * 100) : 0;
-
     return {
       studentId: student.studentId,
+      course: student.course,
+      yearLevel: student.yearLevel,
       currentCompetencies,
       assessmentPerformance: {
         totalAssessments: metrics?.totalAssessments ?? submissions.length,
@@ -182,15 +205,9 @@ export class StudentService {
         attendedClasses: 0,
         percentage: student.attendancePercentage,
       },
-      ojt: {
-        hoursCompleted: student.totalOJTHours,
-        hoursRequired: student.requiredOJTHours,
-        percentage: Math.min(ojtPercentage, 100),
-      },
       riskIndicators: {
-        lowAttendance: student.attendancePercentage < 80,
+        lowAssessmentAttendance: student.attendancePercentage < 80,
         lowAssessmentScore: (metrics?.averageScore ?? 100) < 75,
-        incompleteOJT: student.totalOJTHours < student.requiredOJTHours,
         behavioralConcerns: false,
         academicStruggles: student.riskLevel === 'high',
       },
@@ -209,11 +226,15 @@ export class StudentService {
     const query: {
       status: StudentStatus;
       riskLevel?: RiskLevel;
+      course?: CourseOption;
+      yearLevel?: YearLevelOption;
       $or?: Array<{ studentId: RegExp }>;
     } = { status: 'active' };
     
     if (filters?.status) query.status = filters.status;
     if (filters?.riskLevel) query.riskLevel = filters.riskLevel;
+    if (filters?.course) query.course = filters.course;
+    if (filters?.yearLevel) query.yearLevel = filters.yearLevel;
     if (filters?.search) {
       query.$or = [
         { studentId: new RegExp(filters.search, 'i') },
@@ -240,14 +261,6 @@ export class StudentService {
       { attendancePercentage: Math.min(percentage, 100) },
       { new: true }
     );
-  }
-
-  async updateOJTHours(studentId: string, hoursCompleted: number) {
-    const student = await Student.findById(toObjectId(studentId, 'student id'));
-    if (!student) throw new Error('Student not found');
-
-    student.totalOJTHours = hoursCompleted;
-    return await student.save();
   }
 
   async addCompetency(studentId: string, competencyId: string) {
@@ -295,7 +308,7 @@ export class StudentService {
         { riskLevel: 'high' },
         { riskLevel: 'medium' },
         { attendancePercentage: { $lt: 80 } },
-        { totalOJTHours: { $lt: 250 } },
+        { completedCompetencies: { $size: 0 } },
       ],
     })
       .populate('user', 'firstName lastName email')

@@ -69,7 +69,6 @@ export class RiskAssessmentScheduler {
       $or: [
         { riskLevel: 'high' },
         { attendancePercentage: { $lt: 60 } },
-        { totalOJTHours: { $lt: 100 } },
         { completedCompetencies: { $size: 0 } },
       ],
       status: 'active',
@@ -83,7 +82,6 @@ export class RiskAssessmentScheduler {
       email: (student.user as any)?.email,
       riskLevel: student.riskLevel,
       attendance: student.attendancePercentage,
-      ojtHours: student.totalOJTHours,
       competenciesCompleted: student.completedCompetencies.length,
       urgency: this.calculateUrgencyScore(student),
     }));
@@ -103,12 +101,7 @@ export class RiskAssessmentScheduler {
     const attendanceScore = Math.max(0, 30 - student.attendancePercentage / 3);
     score += attendanceScore;
 
-    // OJT contribution (0-20)
-    const ojtScore = Math.max(0, 20 - student.totalOJTHours / 25);
-    score += ojtScore;
-
-    // Competency contribution (0-10)
-    if (student.completedCompetencies.length === 0) score += 10;
+    if (student.completedCompetencies.length === 0) score += 30;
 
     return Math.min(100, Math.round(score));
   }
@@ -125,7 +118,6 @@ export class RiskAssessmentScheduler {
       period: `Last ${days} days`,
       metrics: {
         attendancePercentage: student.attendancePercentage,
-        ojtHoursProgress: student.totalOJTHours,
         competenciesCompleted: student.completedCompetencies.length,
         riskLevel: student.riskLevel,
       },
@@ -150,7 +142,6 @@ export class RiskAssessmentScheduler {
       currentStatus: {
         riskLevel: student.riskLevel,
         attendance: student.attendancePercentage,
-        ojtProgress: (student.totalOJTHours / student.requiredOJTHours) * 100,
         competenciesCompleted: student.completedCompetencies.length,
       },
       recommendations,
@@ -179,12 +170,6 @@ export class RiskAssessmentScheduler {
       actions.push('Provide transportation or childcare support if needed');
     }
 
-    if (student.totalOJTHours < student.requiredOJTHours / 2) {
-      actions.push('Review OJT placement suitability');
-      actions.push('Contact OJT supervisor for support');
-      actions.push('Consider alternative placement if needed');
-    }
-
     if (student.completedCompetencies.length === 0) {
       actions.push('Refer to tutoring program');
       actions.push('Provide one-on-one coaching');
@@ -211,9 +196,6 @@ export class RiskAssessmentScheduler {
         low: students.filter((s) => s.riskLevel === 'low').length,
       },
       averageAttendance: (students.reduce((sum, s) => sum + s.attendancePercentage, 0) / students.length).toFixed(2),
-      averageOJTCompletion: (
-        students.reduce((sum, s) => sum + (s.totalOJTHours / s.requiredOJTHours), 0) / students.length * 100
-      ).toFixed(2),
       studentNeedingIntervention: students.filter((s) => s.riskLevel !== 'low').length,
       successRate: ((students.filter((s) => s.riskLevel === 'low').length / students.length) * 100).toFixed(2),
     };
@@ -242,7 +224,6 @@ export class RiskAssessmentScheduler {
         email: (s.user as any).email,
         riskLevel: s.riskLevel,
         attendance: s.attendancePercentage,
-        ojt: s.totalOJTHours,
         competenciesCompleted: s.completedCompetencies.length,
       })),
     };

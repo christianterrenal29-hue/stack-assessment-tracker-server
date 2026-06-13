@@ -1,6 +1,5 @@
 import Student from '../models/Student';
-import Attendance from '../models/Attendance';
-import OJT from '../models/OJT';
+import { Assessment } from '../models/Assessment';
 
 type PopulatedUser = {
   firstName?: string;
@@ -14,39 +13,12 @@ export class RiskMonitoringService {
     if (!student) throw new Error('Student not found');
 
     let riskScore = 0;
-    const riskFactors = [];
+    const profile = await this.getStudentAssessmentProfile(studentId);
 
-    // Check attendance (Low attendance = high risk)
-    if (student.attendancePercentage < 75) {
-      riskScore += 30;
-      riskFactors.push('Low attendance');
-    } else if (student.attendancePercentage < 85) {
-      riskScore += 15;
-      riskFactors.push('Moderate attendance');
-    }
-
-    // Check OJT hours (Insufficient OJT = high risk)
-    const ojtCompletion = (student.totalOJTHours / student.requiredOJTHours) * 100;
-    if (ojtCompletion < 50) {
-      riskScore += 30;
-      riskFactors.push('Insufficient OJT hours');
-    } else if (ojtCompletion < 75) {
-      riskScore += 15;
-      riskFactors.push('Low OJT progress');
-    }
-
-    // Check competency completion
-    const competencyCompletion = 
-      student.completedCompetencies.length / 
-      (student.completedCompetencies.length + student.currentCompetencies.length || 1) * 100;
-    
-    if (competencyCompletion < 50) {
-      riskScore += 25;
-      riskFactors.push('Incomplete competencies');
-    } else if (competencyCompletion < 75) {
-      riskScore += 10;
-      riskFactors.push('Low competency progress');
-    }
+    riskScore += profile.absentNoShowCount * 30;
+    riskScore += profile.notYetCompetentCount * 25;
+    riskScore += profile.pendingResultCount * 15;
+    riskScore += profile.incompleteChecklistCount * 10;
 
     // Determine risk level
     let riskLevel: 'low' | 'medium' | 'high' = 'low';
@@ -74,7 +46,7 @@ export class RiskMonitoringService {
     return await Student.find(query)
       .populate('user', 'firstName lastName email')
       .populate('qualifications')
-      .sort({ riskLevel: 1, attendancePercentage: 1 });
+      .sort({ riskLevel: 1, updatedAt: -1 });
   }
 
   async getStudentRiskReport(studentId: string) {
@@ -84,43 +56,50 @@ export class RiskMonitoringService {
     
     if (!student) throw new Error('Student not found');
 
-    const ojt = await OJT.findOne({ student: studentId });
-    const attendanceStats = await this.getAttendanceStats(studentId);
     const user = student.user as unknown as PopulatedUser;
 
     const riskFactors = [];
     const recommendations = [];
+    const profile = await this.getStudentAssessmentProfile(studentId);
 
-    // Analyze risk factors
-    if (student.attendancePercentage < 75) {
+    if (profile.absentNoShowCount > 0) {
       riskFactors.push({
-        factor: 'Low Attendance',
-        current: `${student.attendancePercentage}%`,
-        threshold: '75%',
+        factor: 'Absent/No-show Candidates',
+        current: profile.absentNoShowCount,
+        threshold: 0,
         severity: 'high',
       });
-      recommendations.push('Improve attendance - speak with counselor');
+      recommendations.push('Confirm candidate availability before the next assessment schedule');
     }
 
-    const ojtCompletion = ojt ? (ojt.hoursCompleted / ojt.requiredHours) * 100 : 0;
-    if (ojtCompletion < 50) {
+    if (profile.notYetCompetentCount > 0) {
       riskFactors.push({
-        factor: 'Insufficient OJT Hours',
-        current: `${ojt?.hoursCompleted || 0} hours`,
-        threshold: `${ojt?.requiredHours || 500} hours`,
+        factor: 'Not Yet Competent Result',
+        current: profile.notYetCompetentCount,
+        threshold: 0,
         severity: 'high',
       });
-      recommendations.push('Accelerate OJT work - complete more hours');
+      recommendations.push('Prepare reassessment or remediation plan');
     }
 
-    if (student.completedCompetencies.length === 0) {
+    if (profile.pendingResultCount > 0) {
       riskFactors.push({
-        factor: 'No Completed Competencies',
-        current: '0',
-        threshold: '> 0',
-        severity: 'high',
+        factor: 'Pending Assessment Result',
+        current: profile.pendingResultCount,
+        threshold: 0,
+        severity: 'medium',
       });
-      recommendations.push('Start competency assessments immediately');
+      recommendations.push('Update pending candidate results');
+    }
+
+    if (profile.incompleteChecklistCount > 0) {
+      riskFactors.push({
+        factor: 'Incomplete TESDA Checklist',
+        current: profile.incompleteChecklistCount,
+        threshold: 0,
+        severity: 'medium',
+      });
+      recommendations.push('Complete missing TESDA requirements and checklist documents');
     }
 
     return {
@@ -128,10 +107,10 @@ export class RiskMonitoringService {
       studentName: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
       email: user.email ?? '',
       riskLevel: student.riskLevel,
-      attendancePercentage: student.attendancePercentage,
-      ojtCompletion: ojtCompletion,
-      competenciesCompleted: student.completedCompetencies.length,
-      totalCompetencies: student.completedCompetencies.length + student.currentCompetencies.length,
+      assessmentAttendance: profile.assessmentAttendance,
+      pendingResultCount: profile.pendingResultCount,
+      notYetCompetentCount: profile.notYetCompetentCount,
+      incompleteChecklistCount: profile.incompleteChecklistCount,
       riskFactors,
       recommendations,
       lastUpdated: student.updatedAt,
@@ -139,40 +118,31 @@ export class RiskMonitoringService {
   }
 
   async getAttendanceStats(studentId: string) {
-    const records = await Attendance.find({ student: studentId });
-    
+    const profile = await this.getStudentAssessmentProfile(studentId);
+
     return {
-      total: records.length,
-      present: records.filter((r) => r.status === 'present').length,
-      absent: records.filter((r) => r.status === 'absent').length,
-      late: records.filter((r) => r.status === 'late').length,
-      excused: records.filter((r) => r.status === 'excused').length,
-      percentage: records.length > 0
-        ? ((records.filter((r) => r.status === 'present' || r.status === 'late').length / records.length) * 100).toFixed(2)
-        : 0,
+      total: profile.totalCandidateRecords,
+      present: profile.presentCount,
+      absent: profile.absentNoShowCount,
+      pending: profile.pendingAttendanceCount,
+      percentage: profile.assessmentAttendance,
     };
   }
 
   async generateRiskAnalytics() {
-    const students = await Student.find();
-    
-    const analytics = {
-      totalStudents: students.length,
-      highRisk: students.filter((s) => s.riskLevel === 'high').length,
-      mediumRisk: students.filter((s) => s.riskLevel === 'medium').length,
-      lowRisk: students.filter((s) => s.riskLevel === 'low').length,
-      averageAttendance: (
-        students.reduce((sum, s) => sum + s.attendancePercentage, 0) / students.length
-      ).toFixed(2),
-      averageOJTCompletion: (
-        students.reduce((sum, s) => sum + (s.totalOJTHours / s.requiredOJTHours), 0) / students.length * 100
-      ).toFixed(2),
-      studentsWithLowAttendance: students.filter((s) => s.attendancePercentage < 75).length,
-      studentsWithInsufficientOJT: students.filter((s) => s.totalOJTHours < s.requiredOJTHours / 2).length,
-      studentsWithNoCompetencies: students.filter((s) => s.completedCompetencies.length === 0).length,
-    };
+    const assessments = await Assessment.find();
+    const candidates = assessments.flatMap((assessment) => assessment.candidates);
 
-    return analytics;
+    return {
+      totalSchedules: assessments.length,
+      totalCandidateRecords: candidates.length,
+      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      pendingAttendance: candidates.filter((candidate) => candidate.attendanceStatus === 'pending').length,
+      pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
+      notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
+      incompleteChecklists: assessments.filter((assessment) => !this.hasCompleteChecklist(assessment)).length,
+      missingTesdaRequirements: assessments.filter((assessment) => !this.hasCoreRequirements(assessment)).length,
+    };
   }
 
   async getRecommendationsForStudent(studentId: string): Promise<string[]> {
@@ -181,25 +151,22 @@ export class RiskMonitoringService {
 
     const recommendations: string[] = [];
 
-    if (student.attendancePercentage < 70) {
-      recommendations.push('URGENT: Attendance is critical - must improve immediately');
-      recommendations.push('Contact student to address attendance barriers');
-      recommendations.push('Consider additional support or flexible scheduling');
+    const profile = await this.getStudentAssessmentProfile(studentId);
+
+    if (profile.absentNoShowCount > 0) {
+      recommendations.push('Confirm candidate attendance and reschedule absent/no-show candidates if needed');
     }
 
-    if (student.totalOJTHours < student.requiredOJTHours * 0.5) {
-      recommendations.push('URGENT: OJT progress is severely behind schedule');
-      recommendations.push('Increase OJT hours to meet graduation requirements');
-      recommendations.push('Review OJT placement and supervisor support');
+    if (profile.pendingResultCount > 0) {
+      recommendations.push('Update pending candidate assessment results');
     }
 
-    if (student.completedCompetencies.length === 0) {
-      recommendations.push('CRITICAL: Student has not completed any competencies');
-      recommendations.push('Schedule competency assessments immediately');
-      recommendations.push('Provide tutoring or remedial support if needed');
-    } else if (student.currentCompetencies.length > student.completedCompetencies.length) {
-      recommendations.push('Accelerate competency assessment completion');
-      recommendations.push('Review student performance on assessments');
+    if (profile.notYetCompetentCount > 0) {
+      recommendations.push('Prepare remediation and reassessment for Not Yet Competent candidates');
+    }
+
+    if (profile.incompleteChecklistCount > 0) {
+      recommendations.push('Complete missing TESDA requirements and checklist documents');
     }
 
     if (student.riskLevel === 'high') {
@@ -209,6 +176,53 @@ export class RiskMonitoringService {
     }
 
     return recommendations;
+  }
+
+  private async getStudentAssessmentProfile(studentId: string) {
+    const assessments = await Assessment.find({ 'candidates.student': studentId });
+    const candidateRecords = assessments.flatMap((assessment) =>
+      assessment.candidates
+        .filter((candidate) => String(candidate.student) === studentId)
+        .map((candidate) => ({ assessment, candidate }))
+    );
+
+    const presentCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'present').length;
+    const absentNoShowCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'absent').length;
+    const pendingAttendanceCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'pending').length;
+    const pendingResultCount = candidateRecords.filter(({ candidate }) => candidate.result === 'pending').length;
+    const notYetCompetentCount = candidateRecords.filter(({ candidate }) => candidate.result === 'not_yet_competent').length;
+    const incompleteChecklistCount = candidateRecords.filter(({ assessment }) => !this.hasCompleteChecklist(assessment)).length;
+    const totalCandidateRecords = candidateRecords.length;
+
+    return {
+      totalCandidateRecords,
+      presentCount,
+      absentNoShowCount,
+      pendingAttendanceCount,
+      pendingResultCount,
+      notYetCompetentCount,
+      incompleteChecklistCount,
+      assessmentAttendance: totalCandidateRecords > 0
+        ? ((presentCount / totalCandidateRecords) * 100).toFixed(2)
+        : 0,
+    };
+  }
+
+  private hasCoreRequirements(assessment: any) {
+    return Boolean(
+      assessment.checklist?.applicationFormSubmitted &&
+      assessment.checklist?.selfAssessmentGuideSubmitted &&
+      assessment.checklist?.passportPhotosSubmitted &&
+      assessment.checklist?.assessmentFeeOrAdmissionSlip
+    );
+  }
+
+  private hasCompleteChecklist(assessment: any) {
+    return Boolean(
+      this.hasCoreRequirements(assessment) &&
+      assessment.checklist?.attendanceSheetStatus === 'verified' &&
+      assessment.checklist?.carsRatingSheetStatus === 'verified'
+    );
   }
 }
 

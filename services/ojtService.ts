@@ -1,5 +1,4 @@
 import OJT from '../models/OJT';
-import Student from '../models/Student';
 
 export class OJTService {
   async createOJT(ojtData: any) {
@@ -16,27 +15,18 @@ export class OJTService {
       monthlyReports: ojtData.monthlyReports || [],
     });
 
-    const saved = await ojt.save();
-    
-    // Update student OJT hours
-    await Student.findByIdAndUpdate(
-      ojtData.student,
-      { totalOJTHours: ojtData.hoursCompleted || 0 },
-      { new: true }
-    );
-
-    return saved;
+    return await ojt.save();
   }
 
   async getOJTById(ojtId: string) {
     return await OJT.findById(ojtId)
       .populate('student')
-      .populate('qualification', 'code title requiredOJTHours');
+      .populate('qualification', 'code title');
   }
 
   async getStudentOJT(studentId: string) {
     return await OJT.findOne({ student: studentId })
-      .populate('qualification', 'code title requiredOJTHours');
+      .populate('qualification', 'code title');
   }
 
   async getAllOJTRecords(filters?: any) {
@@ -53,21 +43,11 @@ export class OJTService {
   }
 
   async updateOJTRecord(ojtId: string, updateData: any) {
-    const ojt = await OJT.findByIdAndUpdate(
+    return await OJT.findByIdAndUpdate(
       ojtId,
       updateData,
       { new: true, runValidators: true }
     ).populate('student').populate('qualification');
-
-    if (ojt && updateData.hoursCompleted) {
-      await Student.findByIdAndUpdate(
-        ojt.student._id,
-        { totalOJTHours: updateData.hoursCompleted },
-        { new: true }
-      );
-    }
-
-    return ojt;
   }
 
   async updateOJTHours(ojtId: string, hoursCompleted: number) {
@@ -77,16 +57,7 @@ export class OJTService {
     ojt.hoursCompleted = hoursCompleted;
     ojt.totalHours = hoursCompleted;
 
-    const saved = await ojt.save();
-
-    // Update student total OJT hours
-    await Student.findByIdAndUpdate(
-      ojt.student,
-      { totalOJTHours: hoursCompleted },
-      { new: true }
-    );
-
-    return saved;
+    return await ojt.save();
   }
 
   async addMonthlyReport(ojtId: string, reportData: any) {
@@ -136,9 +107,9 @@ export class OJTService {
   }
 
   async getStudentsWithInsufficientOJT(threshold: number = 250) {
-    return await Student.find({
-      totalOJTHours: { $lt: threshold },
-    }).populate('user', 'firstName lastName email');
+    return await OJT.find({
+      hoursCompleted: { $lt: threshold },
+    }).populate('student');
   }
 
   async getOJTCompletionRate(studentId: string) {

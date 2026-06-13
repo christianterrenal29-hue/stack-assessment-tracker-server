@@ -53,7 +53,6 @@ describe('Protected module route guards', () => {
     ['assessments', '/api/assessments'],
     ['submissions', '/api/submissions'],
     ['attendance', '/api/attendance/me'],
-    ['ojt', '/api/ojt'],
     ['competencies', '/api/competencies'],
     ['qualifications', '/api/qualifications'],
     ['documents', '/api/files'],
@@ -66,5 +65,11 @@ describe('Protected module route guards', () => {
 
     expect(response.status).toBe(401);
     expect(response.body.message).toBe('No token provided');
+  });
+
+  it('does not expose the disabled ojt endpoint', async () => {
+    const response = await request(app).get('/api/ojt');
+
+    expect(response.status).toBe(404);
   });
 });

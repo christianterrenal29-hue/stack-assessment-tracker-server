@@ -7,7 +7,6 @@ export class QualificationService {
       title: qualificationData.title,
       description: qualificationData.description,
       competencies: qualificationData.competencies || [],
-      requiredOJTHours: qualificationData.requiredOJTHours || 500,
       minimumAttendance: qualificationData.minimumAttendance || 80,
       createdBy,
     });

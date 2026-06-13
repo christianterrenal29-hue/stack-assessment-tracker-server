@@ -14,8 +14,9 @@ export interface INotification {
 type HighRiskStudentAlert = {
   instructorId: string;
   name: string;
-  attendance: number;
-  ojt: number;
+  absentNoShowCandidates?: number;
+  pendingResults?: number;
+  notYetCompetentResults?: number;
   studentId: string;
 };
 
@@ -150,12 +151,13 @@ export class NotificationService {
         recipient: student.instructorId,
         type: 'risk_alert',
         title: `Critical: Student ${student.name} at High Risk`,
-        message: `${student.name} is at high risk. Current attendance: ${student.attendance}%, OJT: ${student.ojt} hours.`,
+        message: `${student.name} needs assessment follow-up. Absent/no-show: ${student.absentNoShowCandidates ?? 0}, pending results: ${student.pendingResults ?? 0}, not yet competent: ${student.notYetCompetentResults ?? 0}.`,
         data: {
           studentId: student.studentId,
           riskLevel: 'high',
-          attendance: student.attendance,
-          ojt: student.ojt,
+          absentNoShowCandidates: student.absentNoShowCandidates ?? 0,
+          pendingResults: student.pendingResults ?? 0,
+          notYetCompetentResults: student.notYetCompetentResults ?? 0,
         },
         actionUrl: `/dashboard/students/${student.studentId}`,
       });

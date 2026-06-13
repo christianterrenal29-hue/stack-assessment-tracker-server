@@ -24,16 +24,6 @@ router.get('/attendance', authMiddleware, roleCheck(['administrator', 'instructo
   }
 });
 
-// OJT analytics
-router.get('/ojt', authMiddleware, roleCheck(['administrator', 'instructor']), async (req: AuthRequest, res: Response) => {
-  try {
-    const data = await analyticsService.getOJTAnalytics();
-    res.json(data);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Assessment analytics
 router.get('/assessment', authMiddleware, roleCheck(['administrator', 'instructor']), async (req: AuthRequest, res: Response) => {
   try {

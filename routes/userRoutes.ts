@@ -42,8 +42,8 @@ router.get('/search', roleCheck(['administrator', 'instructor']), async (req, re
   }
 });
 
-// Get users by role (admin only)
-router.get('/role/:role', roleCheck(['administrator']), async (req, res, next) => {
+// Get users by role (administrators and coordinators need assessor assignment lists)
+router.get('/role/:role', roleCheck(['administrator', 'instructor']), async (req, res, next) => {
   try {
     await UserController.getUsersByRole(req, res);
   } catch (error) {

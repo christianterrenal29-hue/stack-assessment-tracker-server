@@ -3,6 +3,8 @@ import type { ParamsDictionary, Query } from 'express-serve-static-core';
 import { authMiddleware, roleCheck, AuthRequest } from '../middleware/authMiddleware';
 import studentService, {
   CreateStudentInput,
+  validateCourse,
+  validateYearLevel,
   StudentFilters,
   UpdateStudentInput,
 } from '../services/studentService';
@@ -16,6 +18,8 @@ interface StudentIdParams extends ParamsDictionary {
 interface StudentQuery extends Query {
   status?: string;
   riskLevel?: string;
+  course?: string;
+  yearLevel?: string;
   search?: string;
 }
 
@@ -32,6 +36,16 @@ const isRiskLevel = (value: string): value is NonNullable<StudentFilters['riskLe
 
 const getErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : 'Unexpected error';
+};
+
+const safeCourse = (value?: string): StudentFilters['course'] | undefined => {
+  if (!value) return undefined;
+  return validateCourse(value);
+};
+
+const safeYearLevel = (value?: string): StudentFilters['yearLevel'] | undefined => {
+  if (!value) return undefined;
+  return validateYearLevel(value);
 };
 
 // Create student
@@ -59,6 +73,8 @@ router.get<{}, unknown, unknown, StudentQuery>(
     const filters: StudentFilters = {
       status: req.query.status && isStudentStatus(req.query.status) ? req.query.status : undefined,
       riskLevel: req.query.riskLevel && isRiskLevel(req.query.riskLevel) ? req.query.riskLevel : undefined,
+      course: safeCourse(req.query.course),
+      yearLevel: safeYearLevel(req.query.yearLevel),
       search: req.query.search,
     };
     const students = await studentService.getAllStudents(filters);

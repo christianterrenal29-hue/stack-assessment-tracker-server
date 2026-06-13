@@ -1,7 +1,5 @@
 import Student from '../models/Student';
-import Attendance from '../models/Attendance';
 import { Assessment } from '../models/Assessment';
-import OJT from '../models/OJT';
 
 export class AnalyticsService {
   /**
@@ -11,20 +9,12 @@ export class AnalyticsService {
     const [
       totalStudents,
       activeStudents,
-      highRiskCount,
-      mediumRiskCount,
-      lowRiskCount,
       attendanceData,
-      ojtData,
       assessmentData,
     ] = await Promise.all([
       Student.countDocuments(),
       Student.countDocuments({ status: 'active' }),
-      Student.countDocuments({ riskLevel: 'high' }),
-      Student.countDocuments({ riskLevel: 'medium' }),
-      Student.countDocuments({ riskLevel: 'low' }),
       this.getAttendanceAnalytics(),
-      this.getOJTAnalytics(),
       this.getAssessmentAnalytics(),
     ]);
 
@@ -33,14 +23,8 @@ export class AnalyticsService {
         total: totalStudents,
         active: activeStudents,
       },
-      riskMetrics: {
-        high: highRiskCount,
-        medium: mediumRiskCount,
-        low: lowRiskCount,
-        atRiskPercentage: ((highRiskCount + mediumRiskCount) / activeStudents * 100).toFixed(2),
-      },
+      assessmentRisk: await this.getRiskFactorAnalysis(),
       attendance: attendanceData,
-      ojt: ojtData,
       assessment: assessmentData,
     };
   }
@@ -49,59 +33,23 @@ export class AnalyticsService {
    * Get attendance analytics
    */
   async getAttendanceAnalytics() {
-    const students = await Student.find({ status: 'active' });
-
-    const totalRecords = await Attendance.countDocuments();
-    const presentRecords = await Attendance.countDocuments({ status: 'present' });
-    const absentRecords = await Attendance.countDocuments({ status: 'absent' });
-    const lateRecords = await Attendance.countDocuments({ status: 'late' });
-    const excusedRecords = await Attendance.countDocuments({ status: 'excused' });
-
-    const avgAttendance = (
-      students.reduce((sum, s) => sum + s.attendancePercentage, 0) / students.length
-    ).toFixed(2);
-
-    const lowAttendanceCount = students.filter((s) => s.attendancePercentage < 75).length;
+    const assessments = await Assessment.find();
+    const candidates = assessments.flatMap((assessment) => assessment.candidates);
+    const totalRecords = candidates.length;
+    const presentRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'present').length;
+    const absentRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length;
+    const pendingRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'pending').length;
 
     return {
       totalRecords,
       breakdown: {
         present: presentRecords,
         absent: absentRecords,
-        late: lateRecords,
-        excused: excusedRecords,
+        pending: pendingRecords,
       },
-      averageAttendance: avgAttendance,
-      lowAttendanceCount,
-      attendanceAlerts: students
-        .filter((s) => s.attendancePercentage < 70)
-        .length,
-    };
-  }
-
-  /**
-   * Get OJT analytics
-   */
-  async getOJTAnalytics() {
-    const ojtRecords = await OJT.find();
-
-    const totalHoursRequired = ojtRecords.reduce((sum, o) => sum + o.requiredHours, 0);
-    const totalHoursCompleted = ojtRecords.reduce((sum, o) => sum + o.hoursCompleted, 0);
-    const completedCount = ojtRecords.filter((o) => o.status === 'completed').length;
-    const ongoingCount = ojtRecords.filter((o) => o.status === 'ongoing').length;
-
-    const completionRate = totalHoursRequired > 0 ? ((totalHoursCompleted / totalHoursRequired) * 100).toFixed(2) : 0;
-
-    return {
-      totalRecords: ojtRecords.length,
-      totalHoursRequired,
-      totalHoursCompleted,
-      completionRate,
-      status: {
-        completed: completedCount,
-        ongoing: ongoingCount,
-      },
-      monthlyReportsTotal: ojtRecords.reduce((sum, o) => sum + o.monthlyReports.length, 0),
+      assessmentAttendanceRate: totalRecords > 0 ? ((presentRecords / totalRecords) * 100).toFixed(2) : '0.00',
+      absentNoShowCandidates: absentRecords,
+      pendingAssessmentAttendance: pendingRecords,
     };
   }
 
@@ -113,20 +61,25 @@ export class AnalyticsService {
 
     const totalAssessments = assessments.length;
     const completedAssessments = assessments.filter((a) => a.status === 'completed').length;
-    const pendingAssessments = assessments.filter((a) => a.status === 'pending').length;
+    const pendingAssessments = assessments.filter((a) => a.status === 'scheduled' || a.status === 'ongoing').length;
 
-    const avgScore = assessments.length > 0
-      ? (assessments.reduce((sum, a) => sum + (a.score || 0), 0) / assessments.length).toFixed(2)
+    const candidates = assessments.flatMap((a) => a.candidates);
+    const avgScore = candidates.length > 0
+      ? ((candidates.filter((candidate) => candidate.result === 'competent').length / candidates.length) * 100).toFixed(2)
       : 0;
 
-    const passRate = completedAssessments > 0
-      ? (assessments.filter((a) => a.score! >= 75).length / completedAssessments * 100).toFixed(2)
+    const passRate = candidates.length > 0
+      ? (candidates.filter((candidate) => candidate.result === 'competent').length / candidates.length * 100).toFixed(2)
       : 0;
 
     return {
       total: totalAssessments,
       completed: completedAssessments,
       pending: pendingAssessments,
+      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
+      notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
+      incompleteChecklists: assessments.filter((assessment) => !this.hasCompleteChecklist(assessment)).length,
       averageScore: avgScore,
       passRate,
     };
@@ -139,31 +92,22 @@ export class AnalyticsService {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const attendanceByDay = await Attendance.aggregate([
-      {
-        $match: {
-          date: { $gte: startDate },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            $dateToString: { format: '%Y-%m-%d', date: '$date' },
-          },
-          count: { $sum: 1 },
-          present: {
-            $sum: {
-              $cond: [{ $eq: ['$status', 'present'] }, 1, 0],
-            },
-          },
-        },
-      },
-      { $sort: { _id: 1 } },
-    ]);
+    const assessments = await Assessment.find({ scheduleDateTime: { $gte: startDate } }).lean();
+    const attendanceByDay = assessments
+      .reduce<Record<string, { date: string; count: number; present: number; absent: number; pending: number }>>((days, assessment) => {
+        const date = new Date(assessment.scheduleDateTime).toISOString().slice(0, 10);
+        const current = days[date] ?? { date, count: 0, present: 0, absent: 0, pending: 0 };
+        assessment.candidates.forEach((candidate) => {
+          current.count++;
+          current[candidate.attendanceStatus]++;
+        });
+        days[date] = current;
+        return days;
+      }, {});
 
     return {
       period: `Last ${days} days`,
-      data: attendanceByDay,
+      data: Object.values(attendanceByDay).sort((a, b) => a.date.localeCompare(b.date)),
     };
   }
 
@@ -212,39 +156,17 @@ export class AnalyticsService {
    * Get risk factor analysis
    */
   async getRiskFactorAnalysis() {
-    const students = await Student.find({ status: 'active' });
+    const assessments = await Assessment.find();
+    const candidates = assessments.flatMap((assessment) => assessment.candidates);
 
-    const riskFactors = {
-      lowAttendance: 0,
-      insufficientOJT: 0,
-      noCompetencies: 0,
-      multipleRiskFactors: 0,
+    return {
+      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
+      notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
+      pendingAssessments: assessments.filter((assessment) => ['scheduled', 'ongoing'].includes(assessment.status)).length,
+      incompleteChecklists: assessments.filter((assessment) => !this.hasCompleteChecklist(assessment)).length,
+      missingTesdaRequirements: assessments.filter((assessment) => !this.hasCoreRequirements(assessment)).length,
     };
-
-    students.forEach((student) => {
-      let factorCount = 0;
-
-      if (student.attendancePercentage < 75) {
-        riskFactors.lowAttendance++;
-        factorCount++;
-      }
-
-      if (student.totalOJTHours < student.requiredOJTHours / 2) {
-        riskFactors.insufficientOJT++;
-        factorCount++;
-      }
-
-      if (student.completedCompetencies.length === 0) {
-        riskFactors.noCompetencies++;
-        factorCount++;
-      }
-
-      if (factorCount > 1) {
-        riskFactors.multipleRiskFactors++;
-      }
-    });
-
-    return riskFactors;
   }
 
   /**
@@ -282,19 +204,19 @@ export class AnalyticsService {
    * Get instructor effectiveness metrics
    */
   async getInstructorMetrics(instructorId: string) {
-    const assessments = await Assessment.find({ instructor: instructorId });
+    const assessments = await Assessment.find({ createdBy: instructorId });
 
     const studentsAssessed = new Set(
       assessments
-        .map((a) => a.student?.toString())
+        .flatMap((a) => a.candidates.map((candidate) => candidate.student.toString()))
         .filter((studentId): studentId is string => Boolean(studentId))
     ).size;
     const avgScore = assessments.length > 0
-      ? (assessments.reduce((sum, a) => sum + (a.score || 0), 0) / assessments.length).toFixed(2)
+      ? ((assessments.flatMap((a) => a.candidates).filter((candidate) => candidate.result === 'competent').length / Math.max(assessments.flatMap((a) => a.candidates).length, 1)) * 100).toFixed(2)
       : 0;
 
     const passRate = assessments.length > 0
-      ? (assessments.filter((a) => a.score! >= 75).length / assessments.length * 100).toFixed(2)
+      ? (assessments.flatMap((a) => a.candidates).filter((candidate) => candidate.result === 'competent').length / Math.max(assessments.flatMap((a) => a.candidates).length, 1) * 100).toFixed(2)
       : 0;
 
     return {
@@ -309,46 +231,41 @@ export class AnalyticsService {
    * Generate compliance report
    */
   async getComplianceReport() {
-    const students = await Student.find({ status: 'active' });
+    const assessments = await Assessment.find();
+    const total = assessments.length || 1;
 
     const complianceMetrics = {
-      attendanceCompliant: 0,
-      ojtCompliant: 0,
-      competencyCompliant: 0,
-      fullyCompliant: 0,
-      total: students.length,
+      total: assessments.length,
+      coreRequirementsComplete: assessments.filter((assessment) => this.hasCoreRequirements(assessment)).length,
+      attendanceSheetsVerified: assessments.filter((assessment) => assessment.checklist?.attendanceSheetStatus === 'verified').length,
+      ratingSheetsVerified: assessments.filter((assessment) => assessment.checklist?.carsRatingSheetStatus === 'verified').length,
+      fullyCompliant: assessments.filter((assessment) => this.hasCompleteChecklist(assessment)).length,
     };
-
-    students.forEach((student) => {
-      let compliant = 0;
-
-      if (student.attendancePercentage >= 80) {
-        complianceMetrics.attendanceCompliant++;
-        compliant++;
-      }
-
-      if (student.totalOJTHours >= student.requiredOJTHours * 0.75) {
-        complianceMetrics.ojtCompliant++;
-        compliant++;
-      }
-
-      if (student.completedCompetencies.length > 0) {
-        complianceMetrics.competencyCompliant++;
-        compliant++;
-      }
-
-      if (compliant === 3) {
-        complianceMetrics.fullyCompliant++;
-      }
-    });
 
     return {
       ...complianceMetrics,
-      attendanceComplianceRate: ((complianceMetrics.attendanceCompliant / students.length) * 100).toFixed(2),
-      ojtComplianceRate: ((complianceMetrics.ojtCompliant / students.length) * 100).toFixed(2),
-      competencyComplianceRate: ((complianceMetrics.competencyCompliant / students.length) * 100).toFixed(2),
-      overallCompliance: ((complianceMetrics.fullyCompliant / students.length) * 100).toFixed(2),
+      coreRequirementRate: ((complianceMetrics.coreRequirementsComplete / total) * 100).toFixed(2),
+      attendanceSheetRate: ((complianceMetrics.attendanceSheetsVerified / total) * 100).toFixed(2),
+      ratingSheetRate: ((complianceMetrics.ratingSheetsVerified / total) * 100).toFixed(2),
+      overallCompliance: ((complianceMetrics.fullyCompliant / total) * 100).toFixed(2),
     };
+  }
+
+  private hasCoreRequirements(assessment: any) {
+    return Boolean(
+      assessment.checklist?.applicationFormSubmitted &&
+      assessment.checklist?.selfAssessmentGuideSubmitted &&
+      assessment.checklist?.passportPhotosSubmitted &&
+      assessment.checklist?.assessmentFeeOrAdmissionSlip
+    );
+  }
+
+  private hasCompleteChecklist(assessment: any) {
+    return Boolean(
+      this.hasCoreRequirements(assessment) &&
+      assessment.checklist?.attendanceSheetStatus === 'verified' &&
+      assessment.checklist?.carsRatingSheetStatus === 'verified'
+    );
   }
 }
 
