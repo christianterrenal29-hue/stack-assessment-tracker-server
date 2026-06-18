@@ -10,7 +10,6 @@ export interface IFile extends Document {
   requirementType: string;
   status: 'pending' | 'verified' | 'rejected';
   remarks?: string;
-  storagePath: string;
   url: string;
   verifiedBy?: mongoose.Types.ObjectId;
   verifiedAt?: Date;
@@ -32,7 +31,6 @@ const fileSchema = new Schema<IFile>(
       default: 'pending',
     },
     remarks: String,
-    storagePath: { type: String, required: true },
     url: { type: String, required: true },
     verifiedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     verifiedAt: Date,

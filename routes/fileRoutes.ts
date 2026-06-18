@@ -1,50 +1,44 @@
-import path from 'node:path';
-import fs from 'node:fs';
-import multer from 'multer';
 import { Router, Response } from 'express';
 import { authMiddleware, roleCheck, AuthRequest } from '../middleware/authMiddleware';
+import { upload } from '../middleware/uploadMiddleware';
+import cloudinaryService from '../services/cloudinaryService';
 import fileService from '../services/fileService';
 import auditLogService from '../services/auditLogService';
 
 const router = Router();
-const uploadDir = path.resolve(__dirname, '..', 'uploads');
-fs.mkdirSync(uploadDir, { recursive: true });
-
-const allowedMimeTypes = new Set([
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'image/jpeg',
-  'image/png',
-]);
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, callback) => callback(null, uploadDir),
-  filename: (_req, file, callback) => {
-    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-    callback(null, `${uniqueSuffix}${path.extname(file.originalname)}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, callback) => {
-    if (!allowedMimeTypes.has(file.mimetype)) {
-      callback(new Error('Only PDF, DOCX, JPG, and PNG files are allowed'));
-      return;
-    }
-    callback(null, true);
-  },
-});
 
 const documentRoles = ['administrator', 'instructor', 'assessor'];
+const viewRoles = ['administrator', 'instructor', 'assessor', 'student'];
+const documentTypes = new Set([
+  'Profile Picture',
+  'Valid ID',
+  'Birth Certificate',
+  'Self-Assessment Guide',
+  'Application Form',
+  'Passport Photo',
+  'Admission Slip / Official Receipt',
+  'Assessment Requirements',
+  'Certificate',
+  'Assessment Evidence',
+  'Attendance Sheet',
+  'Rating Sheet / CARS',
+]);
 
-router.get('/', authMiddleware, roleCheck(documentRoles), async (_req: AuthRequest, res: Response) => {
+router.get('/', authMiddleware, roleCheck(viewRoles), async (req: AuthRequest, res: Response) => {
   try {
-    const files = await fileService.getAll();
+    const files = await fileService.getVisibleForUser(req.user?.userId!, req.user?.role!);
     res.json(files);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to load files' });
+  }
+});
+
+router.get('/student/:id', authMiddleware, roleCheck(documentRoles), async (req: AuthRequest<{ id: string }>, res: Response) => {
+  try {
+    const files = await fileService.getByUploadedFor(String(req.params.id));
+    res.json(files);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to load student documents' });
   }
 });
 
@@ -60,15 +54,25 @@ router.post(
         return;
       }
 
+      const requirementType = documentTypes.has(String(req.body.requirementType))
+        ? String(req.body.requirementType)
+        : 'Assessment Requirements';
+      const cloudinaryUpload = await cloudinaryService.uploadFile({
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        documentType: requirementType,
+      });
+
       const file = await fileService.create({
-        fileName: req.file.filename,
+        fileName: cloudinaryUpload.original_filename || req.file.originalname,
         originalName: req.file.originalname,
         fileType: req.file.mimetype,
         fileSize: req.file.size,
-        storagePath: req.file.path,
+        url: cloudinaryUpload.secure_url,
         uploadedBy: req.user?.userId!,
         uploadedFor: String(req.body.uploadedFor || req.user?.userId),
-        requirementType: String(req.body.requirementType || 'TESDA Requirement'),
+        requirementType,
       });
 
       await auditLogService.create({
@@ -88,8 +92,14 @@ router.post(
   }
 );
 
-router.get('/:id', authMiddleware, roleCheck(documentRoles), async (req: AuthRequest<{ id: string }>, res: Response) => {
+router.get('/:id', authMiddleware, roleCheck(viewRoles), async (req: AuthRequest<{ id: string }>, res: Response) => {
   try {
+    const canAccess = await fileService.canUserAccessFile(String(req.params.id), req.user?.userId!, req.user?.role!);
+    if (!canAccess) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
     const file = await fileService.getById(String(req.params.id));
     if (!file) {
       res.status(404).json({ error: 'File not found' });
@@ -101,14 +111,20 @@ router.get('/:id', authMiddleware, roleCheck(documentRoles), async (req: AuthReq
   }
 });
 
-router.get('/:id/download', authMiddleware, roleCheck(documentRoles), async (req: AuthRequest<{ id: string }>, res: Response) => {
+router.get('/:id/download', authMiddleware, roleCheck(viewRoles), async (req: AuthRequest<{ id: string }>, res: Response) => {
   try {
+    const canAccess = await fileService.canUserAccessFile(String(req.params.id), req.user?.userId!, req.user?.role!);
+    if (!canAccess) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
     const file = await fileService.getById(String(req.params.id));
     if (!file) {
       res.status(404).json({ error: 'File not found' });
       return;
     }
-    res.download(file.storagePath, file.originalName);
+    res.redirect(file.url);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to download file' });
   }

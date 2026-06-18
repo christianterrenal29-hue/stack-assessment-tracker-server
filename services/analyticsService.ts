@@ -38,6 +38,7 @@ export class AnalyticsService {
     const totalRecords = candidates.length;
     const presentRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'present').length;
     const absentRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length;
+    const noShowRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'no-show').length;
     const pendingRecords = candidates.filter((candidate) => candidate.attendanceStatus === 'pending').length;
 
     return {
@@ -45,10 +46,11 @@ export class AnalyticsService {
       breakdown: {
         present: presentRecords,
         absent: absentRecords,
+        noShow: noShowRecords,
         pending: pendingRecords,
       },
       assessmentAttendanceRate: totalRecords > 0 ? ((presentRecords / totalRecords) * 100).toFixed(2) : '0.00',
-      absentNoShowCandidates: absentRecords,
+      absentNoShowCandidates: absentRecords + noShowRecords,
       pendingAssessmentAttendance: pendingRecords,
     };
   }
@@ -76,7 +78,7 @@ export class AnalyticsService {
       total: totalAssessments,
       completed: completedAssessments,
       pending: pendingAssessments,
-      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      absentNoShowCandidates: candidates.filter((candidate) => ['absent', 'no-show'].includes(candidate.attendanceStatus)).length,
       pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
       notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
       incompleteChecklists: assessments.filter((assessment) => !this.hasCompleteChecklist(assessment)).length,
@@ -94,12 +96,13 @@ export class AnalyticsService {
 
     const assessments = await Assessment.find({ scheduleDateTime: { $gte: startDate } }).lean();
     const attendanceByDay = assessments
-      .reduce<Record<string, { date: string; count: number; present: number; absent: number; pending: number }>>((days, assessment) => {
+      .reduce<Record<string, { date: string; count: number; present: number; absent: number; noShow: number; pending: number }>>((days, assessment) => {
         const date = new Date(assessment.scheduleDateTime).toISOString().slice(0, 10);
-        const current = days[date] ?? { date, count: 0, present: 0, absent: 0, pending: 0 };
+        const current = days[date] ?? { date, count: 0, present: 0, absent: 0, noShow: 0, pending: 0 };
         assessment.candidates.forEach((candidate) => {
           current.count++;
-          current[candidate.attendanceStatus]++;
+          if (candidate.attendanceStatus === 'no-show') current.noShow++;
+          else current[candidate.attendanceStatus]++;
         });
         days[date] = current;
         return days;
@@ -160,7 +163,7 @@ export class AnalyticsService {
     const candidates = assessments.flatMap((assessment) => assessment.candidates);
 
     return {
-      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      absentNoShowCandidates: candidates.filter((candidate) => ['absent', 'no-show'].includes(candidate.attendanceStatus)).length,
       pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
       notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
       pendingAssessments: assessments.filter((assessment) => ['scheduled', 'ongoing'].includes(assessment.status)).length,

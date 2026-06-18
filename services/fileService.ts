@@ -1,6 +1,8 @@
-import fs from 'node:fs/promises';
 import { Types } from 'mongoose';
 import { File } from '../models/File';
+import { User } from '../models/User';
+import Student from '../models/Student';
+import cloudinaryService from './cloudinaryService';
 
 export type CreateFileInput = {
   fileName: string;
@@ -10,7 +12,7 @@ export type CreateFileInput = {
   uploadedBy: string;
   uploadedFor: string;
   requirementType: string;
-  storagePath: string;
+  url: string;
 };
 
 export type VerifyFileInput = {
@@ -20,11 +22,39 @@ export type VerifyFileInput = {
 };
 
 export class FileService {
-  async getAll() {
-    return File.find()
+  private populateFileQuery(query: ReturnType<typeof File.find>) {
+    return query
       .populate('uploadedBy', 'firstName lastName email role')
       .populate('verifiedBy', 'firstName lastName email role')
       .sort({ createdAt: -1 });
+  }
+
+  async getAll() {
+    return this.populateFileQuery(File.find());
+  }
+
+  async getVisibleForUser(userId: string, role: string) {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error('Invalid user id');
+    }
+
+    if (['administrator', 'instructor', 'assessor'].includes(role)) {
+      return this.getAll();
+    }
+
+    const student = await Student.findOne({ user: userId }).select('_id');
+    const uploadedForIds = [new Types.ObjectId(userId)];
+    if (student?._id) uploadedForIds.push(student._id as Types.ObjectId);
+
+    return this.populateFileQuery(File.find({ uploadedFor: { $in: uploadedForIds } }));
+  }
+
+  async getByUploadedFor(uploadedFor: string) {
+    if (!Types.ObjectId.isValid(uploadedFor)) {
+      throw new Error('Invalid student/user id');
+    }
+
+    return this.populateFileQuery(File.find({ uploadedFor }));
   }
 
   async create(input: CreateFileInput) {
@@ -39,11 +69,13 @@ export class FileService {
     const file = await File.create({
       ...input,
       uploadedFor,
-      url: `/api/files`,
     });
 
-    file.url = `/api/files/${file._id}/download`;
-    await file.save();
+    if (input.requirementType === 'Profile Picture') {
+      const student = await Student.findById(uploadedFor);
+      const userId = student?.user ?? uploadedFor;
+      await User.findByIdAndUpdate(userId, { avatar: input.url });
+    }
 
     return file;
   }
@@ -74,8 +106,22 @@ export class FileService {
     if (!file) return null;
 
     await File.findByIdAndDelete(id);
-    await fs.unlink(file.storagePath).catch(() => undefined);
+    await cloudinaryService.deleteBySecureUrl(file.url, file.fileType).catch(() => undefined);
     return file;
+  }
+
+  async canUserAccessFile(fileId: string, userId: string, role: string) {
+    if (['administrator', 'instructor', 'assessor'].includes(role)) {
+      return true;
+    }
+
+    const file = await File.findById(fileId).select('uploadedFor');
+    if (!file) return false;
+
+    if (String(file.uploadedFor) === userId) return true;
+
+    const student = await Student.findOne({ user: userId }).select('_id');
+    return Boolean(student && String(file.uploadedFor) === String(student._id));
   }
 }
 

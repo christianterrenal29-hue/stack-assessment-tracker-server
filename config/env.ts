@@ -18,4 +18,8 @@ export const config = {
   SMTP_USER: process.env.SMTP_USER || '',
   SMTP_PASS: process.env.SMTP_PASS || '',
   SENDER_EMAIL: process.env.SENDER_EMAIL || 'noreply@assessmenttracker.com',
+  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || '',
+  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || '',
+  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || '',
+  CLOUDINARY_FOLDER: process.env.CLOUDINARY_FOLDER || 'tesda-assessment-tracker',
 };

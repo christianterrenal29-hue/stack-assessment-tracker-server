@@ -136,7 +136,7 @@ export class RiskMonitoringService {
     return {
       totalSchedules: assessments.length,
       totalCandidateRecords: candidates.length,
-      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      absentNoShowCandidates: candidates.filter((candidate) => ['absent', 'no-show'].includes(candidate.attendanceStatus)).length,
       pendingAttendance: candidates.filter((candidate) => candidate.attendanceStatus === 'pending').length,
       pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
       notYetCompetentResults: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
@@ -187,7 +187,7 @@ export class RiskMonitoringService {
     );
 
     const presentCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'present').length;
-    const absentNoShowCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'absent').length;
+    const absentNoShowCount = candidateRecords.filter(({ candidate }) => ['absent', 'no-show'].includes(candidate.attendanceStatus)).length;
     const pendingAttendanceCount = candidateRecords.filter(({ candidate }) => candidate.attendanceStatus === 'pending').length;
     const pendingResultCount = candidateRecords.filter(({ candidate }) => candidate.result === 'pending').length;
     const notYetCompetentCount = candidateRecords.filter(({ candidate }) => candidate.result === 'not_yet_competent').length;

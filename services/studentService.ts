@@ -1,5 +1,5 @@
 import Student, { COURSE_OPTIONS, CourseOption, YEAR_LEVEL_OPTIONS, YearLevelOption } from '../models/Student';
-import { User } from '../models/User';
+import { User, UserRole } from '../models/User';
 import { Types } from 'mongoose';
 import { StudentPerformance } from '../models/StudentPerformance';
 import { Submission } from '../models/Submission';
@@ -124,7 +124,7 @@ export class StudentService {
 
   async getStudentById(studentId: string) {
     return await Student.findById(toObjectId(studentId, 'student id'))
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .populate('currentCompetencies')
       .populate('completedCompetencies');
@@ -133,7 +133,7 @@ export class StudentService {
   async getStudentProgress(studentId: string) {
     const studentObjectId = toObjectId(studentId, 'student id');
     const student = await Student.findById(studentObjectId)
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .populate('currentCompetencies')
       .populate('completedCompetencies');
@@ -152,7 +152,7 @@ export class StudentService {
 
   async getStudentProgressByUserId(userId: string) {
     const student = await Student.findOne({ user: toObjectId(userId, 'user id') })
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .populate('currentCompetencies')
       .populate('completedCompetencies');
@@ -216,10 +216,43 @@ export class StudentService {
 
   async getStudentByUserId(userId: string) {
     return await Student.findOne({ user: toObjectId(userId, 'user id') })
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .populate('currentCompetencies')
       .populate('completedCompetencies');
+  }
+
+  async getCurrentStudentProfile(currentUser: { userId: string; email?: string; role: UserRole }) {
+    const userObjectId = toObjectId(currentUser.userId, 'user id');
+    const user =
+      (await User.findById(userObjectId).select('-password').lean()) ?? {
+        _id: currentUser.userId,
+        email: currentUser.email,
+        role: currentUser.role,
+      };
+
+    let student = await Student.findOne({ user: userObjectId })
+      .populate('user', 'firstName lastName email avatar')
+      .populate('qualifications')
+      .populate('currentCompetencies')
+      .populate('completedCompetencies');
+
+    if (!student && currentUser.email) {
+      const userByEmail = await User.findOne({ email: currentUser.email }).select('_id').lean();
+      const emailUserId = userByEmail?._id;
+      if (emailUserId) {
+        student = await Student.findOne({ user: emailUserId })
+          .populate('user', 'firstName lastName email avatar')
+          .populate('qualifications')
+          .populate('currentCompetencies')
+          .populate('completedCompetencies');
+      }
+    }
+
+    return {
+      user,
+      student: student ?? null,
+    };
   }
 
   async getAllStudents(filters?: StudentFilters) {
@@ -242,7 +275,7 @@ export class StudentService {
     }
 
     return await Student.find(query)
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .sort({ createdAt: -1 });
   }
@@ -252,7 +285,7 @@ export class StudentService {
       toObjectId(studentId, 'student id'),
       buildStudentUpdate(updateData),
       { new: true, runValidators: true }
-    ).populate('user', 'firstName lastName email');
+    ).populate('user', 'firstName lastName email avatar');
   }
 
   async updateAttendancePercentage(studentId: string, percentage: number) {
@@ -311,7 +344,7 @@ export class StudentService {
         { completedCompetencies: { $size: 0 } },
       ],
     })
-      .populate('user', 'firstName lastName email')
+      .populate('user', 'firstName lastName email avatar')
       .populate('qualifications')
       .sort({ riskLevel: 1 });
   }

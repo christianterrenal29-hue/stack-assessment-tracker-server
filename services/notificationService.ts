@@ -3,7 +3,7 @@ import { Types } from 'mongoose';
 
 export interface INotification {
   recipient: string;
-  type: 'risk_alert' | 'intervention' | 'achievement' | 'general';
+  type: 'risk_alert' | 'intervention' | 'achievement' | 'general' | 'upcoming_assessment' | 'missing_requirements' | 'result_posted' | 'schedule_updated';
   title: string;
   message: string;
   data?: Record<string, unknown>;
@@ -88,6 +88,50 @@ export class NotificationService {
       title: `Achievement Unlocked: ${achievement}`,
       message: details,
       actionUrl: '/dashboard/achievements',
+    });
+  }
+
+  async sendUpcomingAssessmentNotification(userId: string, assessmentTitle: string, scheduleDateTime: Date, actionUrl: string) {
+    return this.createNotification({
+      recipient: userId,
+      type: 'upcoming_assessment',
+      title: 'Upcoming Assessment',
+      message: `${assessmentTitle} is scheduled on ${scheduleDateTime.toLocaleString()}.`,
+      data: { assessmentTitle, scheduleDateTime },
+      actionUrl,
+    });
+  }
+
+  async sendMissingRequirementsNotification(userId: string, assessmentTitle: string, actionUrl: string) {
+    return this.createNotification({
+      recipient: userId,
+      type: 'missing_requirements',
+      title: 'Missing Requirements',
+      message: `${assessmentTitle} has incomplete assessment requirements or unverified checklist items.`,
+      data: { assessmentTitle },
+      actionUrl,
+    });
+  }
+
+  async sendResultPostedNotification(userId: string, candidateName: string, result: string, actionUrl: string) {
+    return this.createNotification({
+      recipient: userId,
+      type: 'result_posted',
+      title: 'Result Posted',
+      message: `${candidateName} result has been posted as ${result.replace(/_/g, ' ')}.`,
+      data: { candidateName, result },
+      actionUrl,
+    });
+  }
+
+  async sendScheduleUpdatedNotification(userId: string, assessmentTitle: string, actionUrl: string) {
+    return this.createNotification({
+      recipient: userId,
+      type: 'schedule_updated',
+      title: 'Schedule Updated',
+      message: `${assessmentTitle} schedule details were updated.`,
+      data: { assessmentTitle },
+      actionUrl,
     });
   }
 

@@ -4,6 +4,7 @@ import Student from '../models/Student';
 import { User } from '../models/User';
 import { AppError } from '../middleware/errorHandler';
 import { validateCourse, validateYearLevel } from './studentService';
+import notificationService from './notificationService';
 
 const CONFLICT_WINDOW_MS = 4 * 60 * 60 * 1000;
 
@@ -15,8 +16,10 @@ type ScheduleInput = {
   ncLevel: string;
   scheduleDateTime: string | Date;
   assessmentCenter: string;
+  labRoom?: string;
   assessor: string;
   qualificationHandled?: string;
+  toolsMaterialsChecklist?: string;
   candidates?: string[];
   checklist?: Record<string, unknown>;
   status?: string;
@@ -26,13 +29,13 @@ type ScheduleInput = {
 };
 
 type CandidateUpdate = {
-  attendanceStatus?: 'pending' | 'present' | 'absent';
+  attendanceStatus?: 'pending' | 'present' | 'absent' | 'no-show';
   result?: 'pending' | 'competent' | 'not_yet_competent';
   remarks?: string;
 };
 
 const VALID_SCHEDULE_STATUSES = ['scheduled', 'ongoing', 'completed', 'cancelled'] as const;
-const VALID_ATTENDANCE_STATUSES = ['pending', 'present', 'absent'] as const;
+const VALID_ATTENDANCE_STATUSES = ['pending', 'present', 'absent', 'no-show'] as const;
 const VALID_RESULTS = ['pending', 'competent', 'not_yet_competent'] as const;
 
 const assertObjectId = (id: string, label: string) => {
@@ -132,8 +135,10 @@ export class AssessmentService {
       ncLevel,
       scheduleDateTime,
       assessmentCenter,
+      labRoom,
       assessor,
       qualificationHandled,
+      toolsMaterialsChecklist,
       candidates,
       checklist,
       status,
@@ -169,6 +174,7 @@ export class AssessmentService {
       ncLevel,
       scheduleDateTime: scheduleDate,
       assessmentCenter,
+      labRoom,
       assessor,
       assessorName: `${assessorUser.firstName} ${assessorUser.lastName}`,
       qualificationHandled: qualificationHandled || `${qualificationTitle} ${ncLevel}`,
@@ -177,6 +183,7 @@ export class AssessmentService {
       instructor: createdBy,
       questions: [],
       checklist,
+      toolsMaterialsChecklist,
       status: status || 'scheduled',
       institution,
       department,
@@ -184,6 +191,7 @@ export class AssessmentService {
     });
 
     await assessment.save();
+    await this.notifyScheduleCreated(assessment);
     return this.getAssessmentById(assessment.id);
   }
 
@@ -218,13 +226,16 @@ export class AssessmentService {
     if (updateData.ncLevel !== undefined) assessment.ncLevel = updateData.ncLevel;
     if (updateData.scheduleDateTime !== undefined) assessment.scheduleDateTime = nextScheduleDate;
     if (updateData.assessmentCenter !== undefined) assessment.assessmentCenter = updateData.assessmentCenter;
+    if (updateData.labRoom !== undefined) assessment.labRoom = updateData.labRoom;
     if (updateData.qualificationHandled !== undefined) assessment.qualificationHandled = updateData.qualificationHandled;
+    if (updateData.toolsMaterialsChecklist !== undefined) assessment.toolsMaterialsChecklist = updateData.toolsMaterialsChecklist;
     if (updateData.status !== undefined) assessment.status = updateData.status as any;
     if (updateData.institution !== undefined) assessment.institution = updateData.institution as any;
     if (updateData.department !== undefined) assessment.department = updateData.department as any;
     if (updateData.checklist !== undefined) assessment.checklist = { ...assessment.checklist, ...updateData.checklist } as any;
 
     await assessment.save();
+    await this.notifyScheduleUpdated(assessment);
     return this.getAssessmentById(assessmentId);
   }
 
@@ -281,6 +292,9 @@ export class AssessmentService {
     if (update.remarks !== undefined) candidate.remarks = update.remarks;
 
     await assessment.save();
+    if (update.result && update.result !== 'pending') {
+      await this.notifyResultPosted(assessment, studentId, update.result);
+    }
     return this.getAssessmentById(assessmentId);
   }
 
@@ -290,6 +304,7 @@ export class AssessmentService {
     const completedAssessments = schedules.filter((schedule) => schedule.status === 'completed').length;
     const upcomingSchedules = schedules.filter((schedule) => schedule.status === 'scheduled' && new Date(schedule.scheduleDateTime) >= now);
     const candidates = schedules.flatMap((schedule) => schedule.candidates);
+    const missingRequirements = schedules.filter((schedule) => !this.hasCompleteRequirements(schedule.checklist)).length;
 
     return {
       upcomingAssessmentSchedules: upcomingSchedules.length,
@@ -297,11 +312,24 @@ export class AssessmentService {
       completedAssessments,
       competentCount: candidates.filter((candidate) => candidate.result === 'competent').length,
       notYetCompetentCount: candidates.filter((candidate) => candidate.result === 'not_yet_competent').length,
-      absentNoShowCandidates: candidates.filter((candidate) => candidate.attendanceStatus === 'absent').length,
+      absentNoShowCandidates: candidates.filter((candidate) => ['absent', 'no-show'].includes(candidate.attendanceStatus)).length,
+      pendingResults: candidates.filter((candidate) => candidate.result === 'pending').length,
+      missingRequirements,
       upcomingSchedules: upcomingSchedules
         .sort((a, b) => new Date(a.scheduleDateTime).getTime() - new Date(b.scheduleDateTime).getTime())
         .slice(0, 5),
     };
+  }
+
+  private static hasCompleteRequirements(checklist: any) {
+    return Boolean(
+      checklist?.applicationFormSubmitted &&
+      checklist?.selfAssessmentGuideSubmitted &&
+      checklist?.passportPhotosSubmitted &&
+      checklist?.assessmentFeeOrAdmissionSlip &&
+      checklist?.attendanceSheetStatus === 'verified' &&
+      checklist?.carsRatingSheetStatus === 'verified'
+    );
   }
 
   static async getReport(type: string) {
@@ -368,5 +396,58 @@ export class AssessmentService {
     if (conflict) {
       throw new AppError(409, 'Assessor has a conflicting assessment schedule within 4 hours');
     }
+  }
+
+  private static async notifyScheduleCreated(assessment: any) {
+    const actionUrl = '/instructor/assessments';
+    const recipients = new Set([String(assessment.createdBy), String(assessment.assessor)].filter(Boolean));
+
+    await Promise.all(
+      Array.from(recipients).map((userId) =>
+        notificationService.sendUpcomingAssessmentNotification(userId, assessment.title, assessment.scheduleDateTime, actionUrl).catch(() => undefined)
+      )
+    );
+
+    if (!this.hasCompleteRequirements(assessment.checklist)) {
+      await Promise.all(
+        Array.from(recipients).map((userId) =>
+          notificationService.sendMissingRequirementsNotification(userId, assessment.title, actionUrl).catch(() => undefined)
+        )
+      );
+    }
+  }
+
+  private static async notifyScheduleUpdated(assessment: any) {
+    const actionUrl = '/instructor/assessments';
+    const recipients = new Set([String(assessment.createdBy), String(assessment.assessor)].filter(Boolean));
+    await Promise.all(
+      Array.from(recipients).map((userId) =>
+        notificationService.sendScheduleUpdatedNotification(userId, assessment.title, actionUrl).catch(() => undefined)
+      )
+    );
+
+    if (!this.hasCompleteRequirements(assessment.checklist)) {
+      await Promise.all(
+        Array.from(recipients).map((userId) =>
+          notificationService.sendMissingRequirementsNotification(userId, assessment.title, actionUrl).catch(() => undefined)
+        )
+      );
+    }
+  }
+
+  private static async notifyResultPosted(assessment: any, studentId: string, result: string) {
+    const student = typeof Student.findById === 'function'
+      ? await Student.findById(studentId).populate('user', 'firstName lastName').lean().catch(() => null)
+      : null;
+    const candidateName = student?.user
+      ? `${(student.user as any).firstName} ${(student.user as any).lastName}`
+      : student?.studentId ?? 'Candidate';
+    const recipients = new Set([String(assessment.createdBy), String(assessment.assessor)].filter(Boolean));
+
+    await Promise.all(
+      Array.from(recipients).map((userId) =>
+        notificationService.sendResultPostedNotification(userId, candidateName, result, '/candidate-results').catch(() => undefined)
+      )
+    );
   }
 }

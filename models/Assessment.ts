@@ -4,7 +4,7 @@ import { COURSE_OPTIONS, CourseOption, YEAR_LEVEL_OPTIONS, YearLevelOption } fro
 export const MAX_CANDIDATES_PER_SCHEDULE = 10;
 
 export type AssessmentScheduleStatus = 'scheduled' | 'ongoing' | 'completed' | 'cancelled';
-export type CandidateAttendanceStatus = 'pending' | 'present' | 'absent';
+export type CandidateAttendanceStatus = 'pending' | 'present' | 'absent' | 'no-show';
 export type CandidateAssessmentResult = 'pending' | 'competent' | 'not_yet_competent';
 export type ChecklistStatus = 'pending' | 'submitted' | 'verified' | 'missing';
 
@@ -32,6 +32,7 @@ export interface IAssessment extends Document {
   ncLevel: string;
   scheduleDateTime: Date;
   assessmentCenter: string;
+  labRoom?: string;
   assessor: mongoose.Types.ObjectId;
   assessorName: string;
   qualificationHandled: string;
@@ -42,6 +43,7 @@ export interface IAssessment extends Document {
   maxCandidates: number;
   candidates: IAssessmentCandidate[];
   checklist: IAssessmentChecklist;
+  toolsMaterialsChecklist?: string;
   status: AssessmentScheduleStatus;
   institution?: mongoose.Types.ObjectId;
   department?: mongoose.Types.ObjectId;
@@ -55,7 +57,7 @@ const candidateSchema = new Schema<IAssessmentCandidate>(
     student: { type: Schema.Types.ObjectId, ref: 'Student', required: true },
     attendanceStatus: {
       type: String,
-      enum: ['pending', 'present', 'absent'],
+      enum: ['pending', 'present', 'absent', 'no-show'],
       default: 'pending',
     },
     result: {
@@ -97,6 +99,7 @@ const assessmentSchema = new Schema<IAssessment>(
     ncLevel: { type: String, required: true, trim: true },
     scheduleDateTime: { type: Date, required: true, index: true },
     assessmentCenter: { type: String, required: true, trim: true },
+    labRoom: { type: String, trim: true },
     assessor: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     assessorName: { type: String, required: true, trim: true },
     qualificationHandled: { type: String, required: true, trim: true },
@@ -121,6 +124,7 @@ const assessmentSchema = new Schema<IAssessment>(
       },
     },
     checklist: { type: checklistSchema, default: () => ({}) },
+    toolsMaterialsChecklist: { type: String, trim: true },
     status: {
       type: String,
       enum: ['scheduled', 'ongoing', 'completed', 'cancelled'],

@@ -67,7 +67,7 @@ router.post<{}, unknown, CreateStudentInput & { userId: string }>(
 router.get<{}, unknown, unknown, StudentQuery>(
   '/',
   authMiddleware,
-  roleCheck(['administrator', 'instructor']),
+  roleCheck(['administrator', 'instructor', 'assessor']),
   async (req: AuthRequest<{}, unknown, unknown, StudentQuery>, res: Response) => {
   try {
     const filters: StudentFilters = {
@@ -88,9 +88,16 @@ router.get<{}, unknown, unknown, StudentQuery>(
 // Get current user's student record
 router.get('/user/profile', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const student = await studentService.getStudentByUserId(req.user?.userId!);
-    if (!student) return res.status(404).json({ error: 'Student record not found' });
-    res.json(student);
+    if (!req.user) {
+      return res.status(401).json({ status: 'error', statusCode: 401, message: 'Not authenticated' });
+    }
+
+    if (req.user.role !== 'student') {
+      return res.status(403).json({ status: 'error', statusCode: 403, message: 'Student profile is only available for student users' });
+    }
+
+    const profile = await studentService.getCurrentStudentProfile(req.user);
+    res.json({ status: 'success', data: profile });
   } catch (error: unknown) {
     res.status(500).json({ error: getErrorMessage(error) });
   }

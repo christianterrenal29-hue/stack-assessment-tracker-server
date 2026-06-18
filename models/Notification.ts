@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface INotificationDocument extends Document {
   recipient: mongoose.Types.ObjectId;
-  type: 'risk_alert' | 'intervention' | 'achievement' | 'general';
+  type: 'risk_alert' | 'intervention' | 'achievement' | 'general' | 'upcoming_assessment' | 'missing_requirements' | 'result_posted' | 'schedule_updated';
   title: string;
   message: string;
   data?: Record<string, unknown>;
@@ -17,7 +17,7 @@ const notificationSchema = new Schema<INotificationDocument>(
     recipient: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: {
       type: String,
-      enum: ['risk_alert', 'intervention', 'achievement', 'general'],
+      enum: ['risk_alert', 'intervention', 'achievement', 'general', 'upcoming_assessment', 'missing_requirements', 'result_posted', 'schedule_updated'],
       required: true,
       index: true,
     },
